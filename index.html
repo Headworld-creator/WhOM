@@ -3,20 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ShopLite — WhatsApp Store</title>
+<title>WhOM — WhatsApp Commerce</title>
 <link rel="stylesheet" href="styles.css">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
 <header class="topbar"><div class="container topbar-inner">
-<a class="logo" href="#">ShopLite</a>
+<a class="logo" href="#" aria-label="WhOM home"><span class="logo-mark">W</span><span class="logo-copy">WhOM<small>Commerce workspace</small></span></a>
 <nav class="topnav">
 <button class="nav-btn" data-view="storefront">Storefront</button>
 <button class="nav-btn" data-view="dashboard">Vendor Dashboard</button>
 <button class="nav-btn" data-view="orders">Orders</button>
 <button class="nav-btn" data-view="auth">Account</button>
 </nav>
-<div class="top-actions"><span class="pill" id="apiStatus">API: Not connected</span><span class="pill" id="userChip" style="display:none"></span><button class="btn btn-dark" id="cartBtn">Cart <span id="cartCount">0</span></button><button class="btn btn-outline" id="logoutBtn" style="display:none">Log out</button></div>
+<div class="top-actions"><span class="pill api-pill" id="apiStatus"><span class="status-dot"></span> API: Not connected</span><span class="pill" id="userChip" style="display:none"></span><button class="btn btn-dark cart-trigger" id="cartBtn"><span aria-hidden="true">▣</span> Cart <span class="cart-count" id="cartCount">0</span></button><button class="btn btn-outline" id="logoutBtn" style="display:none">Log out</button></div>
 </div></header>
 <main class="container">
 <div id="configBanner" class="banner hidden">Backend not connected. Set <code>API_BASE</code> in <code>api.js</code> to your FastAPI URL. See README.md</div>
@@ -25,7 +25,7 @@
 <section id="view-auth" class="view active">
 <div class="auth-wrap">
 <div class="card auth-card">
-<h2 id="authTitle">Create your vendor account</h2>
+<span class="eyebrow">WELCOME TO WHOM</span><h2 id="authTitle">Create your vendor account</h2>
 <p class="muted" id="authSub">Step 1: Create a user account. Step 2: Create your store. Step 3: Add products.</p>
 <div class="filter-pills" style="margin:12px 0"><button class="pill-btn active" id="tabSignup" type="button">Sign up</button><button class="pill-btn" id="tabLogin" type="button">Log in</button></div>
 <form id="authForm">
@@ -56,7 +56,7 @@
 <div class="search-row"><input id="searchInput" placeholder="Search products..."><select id="categoryFilter"><option value="all">All Categories</option></select></div>
 </div>
 <div class="hero-card"><h3>How it works</h3><ol><li>Pick products → Add to cart</li><li>Checkout with name + address</li><li>Vendor gets it on WhatsApp instantly</li></ol><div class="hero-stat"><strong id="totalProducts">0</strong><span>Products live</span></div></div></div>
-<div class="section-head"><h2>Catalog</h2><p id="catalogSub">—</p></div>
+<div class="section-head"><div><span class="eyebrow">SHOP THE COLLECTION</span><h2>Catalog</h2></div><p id="catalogSub">—</p></div>
 <div id="productGrid" class="grid"></div>
 <div id="emptyProducts" class="empty hidden"><h3>No products yet</h3><p id="emptyProductsText">This store has no products.</p><button class="btn btn-primary" onclick="goDashboard()">Go to Dashboard</button></div>
 <div id="emptySearch" class="empty hidden">No products match your search.</div>
@@ -67,7 +67,7 @@
 <section id="view-dashboard" class="view">
 <div id="dashboardGate" class="empty hidden"><h3>Log in first</h3><p>Your dashboard belongs to your account. Log in to see it.</p><button class="btn btn-primary" onclick="showView('auth')">Log in</button></div>
 <div id="dashboardContent">
-<div class="section-head"><div><h2>Vendor Dashboard</h2><p id="dashboardSub">—</p></div><button class="btn btn-primary" id="addProductBtn">+ Add Product</button></div>
+<div class="section-head"><div><span class="eyebrow">OVERVIEW</span><h2>Vendor Dashboard</h2><p id="dashboardSub">—</p></div><button class="btn btn-primary" id="addProductBtn">+ Add Product</button></div>
 <div class="card" id="noStoreCard" style="display:none"><h3>Create your store</h3><p class="muted">You have an account, but no store yet. Fill this in — it will belong to you.</p></div>
 <div class="card">
 <h3>Your Store Settings</h3>
@@ -95,7 +95,7 @@
 <section id="view-orders" class="view">
 <div id="ordersGate" class="empty hidden"><h3>Log in first</h3><p>Orders belong to your account. Log in to see them.</p><button class="btn btn-primary" onclick="showView('auth')">Log in</button></div>
 <div id="ordersContent">
-<div class="section-head"><div><h2>Orders</h2><p>New → Preparing → Delivered.</p></div>
+<div class="section-head"><div><span class="eyebrow">SALES MANAGEMENT</span><h2>Orders</h2><p>New → Preparing → Delivered.</p></div>
 <div class="filter-pills"><button class="pill-btn active" data-status="all">All</button><button class="pill-btn" data-status="New">New</button><button class="pill-btn" data-status="Preparing">Preparing</button><button class="pill-btn" data-status="Delivered">Delivered</button></div></div>
 <div id="ordersList" class="orders"></div>
 <div id="emptyOrders" class="empty hidden"><h3>No orders yet</h3><p>When a customer checks out, their order will appear here.</p></div>
