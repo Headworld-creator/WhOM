@@ -1,0 +1,37 @@
+# Render Blueprint — New → Blueprint → pick this repo.
+# MySQL lives on Clever Cloud, so secrets marked `sync: false` are entered once in the dashboard.
+services:
+  - type: web
+    name: whom
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: TRUST_PROXY
+        value: "true"
+      - key: AUTO_MIGRATE
+        value: "true"
+      - key: APP_TIMEZONE
+        value: Africa/Lagos
+      - key: JWT_SECRET
+        generateValue: true          # Render creates a strong random value
+      # Clever Cloud MySQL add-on → "Information" tab. Paste the values:
+      - key: MYSQL_ADDON_HOST
+        sync: false
+      - key: MYSQL_ADDON_PORT
+        sync: false
+      - key: MYSQL_ADDON_DB
+        sync: false
+      - key: MYSQL_ADDON_USER
+        sync: false
+      - key: MYSQL_ADDON_PASSWORD
+        sync: false
+      # Only needed if the frontend is hosted on a different domain:
+      # - key: CORS_ORIGINS
+      #   value: https://yourname.github.io

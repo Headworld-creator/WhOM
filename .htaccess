@@ -1,0 +1,51 @@
+# ─────────────────────────────────────────────────────────────
+#  WhOM — Apache config (XAMPP and the Docker image both use this)
+#  Needs: mod_rewrite (+ mod_headers, optional)
+#  XAMPP: httpd.conf must allow it → AllowOverride All for htdocs (default in XAMPP).
+# ─────────────────────────────────────────────────────────────
+
+Options -Indexes -MultiViews
+DirectoryIndex index.html index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Keep the Authorization header (Apache/CGI/FastCGI strip it by default).
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Never serve repo internals.
+    RewriteRule ^(docker|\.git|\.github|node_modules)(/|$) - [F,L]
+
+    # API + pretty store links go to the single-file backend.
+    # Pattern is directory-relative, so it works from /, /whom/, anywhere.
+    RewriteRule ^(api|store)(/|$) server.php [L,QSA]
+</IfModule>
+
+<IfModule mod_setenvif.c>
+    SetEnvIf Authorization "(.+)" HTTP_AUTHORIZATION=$1
+</IfModule>
+
+# Secrets and source/config must never be downloadable.
+<FilesMatch "^(\.env.*|.*\.sql|Dockerfile|\.dockerignore|\.gitignore|render\.yaml|.*\.md|.*\.sh|composer\.(json|lock))$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Static assets: cache briefly; HTML/JS revalidate so deploys show up quickly.
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/png "access plus 1 week"
+    ExpiresByType image/svg+xml "access plus 1 week"
+</IfModule>

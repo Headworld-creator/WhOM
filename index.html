@@ -4,123 +4,140 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WhOM — WhatsApp Commerce</title>
+<meta name="description" content="Create a store, share one link, receive orders on WhatsApp.">
 <link rel="stylesheet" href="styles.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 </head>
 <body>
 <header class="topbar"><div class="container topbar-inner">
-<a class="logo" href="#" aria-label="WhOM home"><span class="logo-mark">W</span><span class="logo-copy">WhOM<small>Commerce workspace</small></span></a>
-<nav class="topnav">
-<button class="nav-btn" data-view="storefront">Storefront</button>
-<button class="nav-btn" data-view="dashboard">Vendor Dashboard</button>
-<button class="nav-btn" data-view="orders">Orders</button>
-<button class="nav-btn" data-view="auth">Account</button>
+<a class="logo" href="./" aria-label="WhOM home"><span class="logo-mark">W</span><span class="logo-copy">WhOM<small>Commerce workspace</small></span></a>
+<nav class="topnav" aria-label="Main">
+<button class="nav-btn" data-view="storefront" type="button">Storefront</button>
+<button class="nav-btn" data-view="dashboard" type="button">Vendor Dashboard</button>
+<button class="nav-btn" data-view="orders" type="button">Orders</button>
+<button class="nav-btn" data-view="auth" type="button">Account</button>
 </nav>
-<div class="top-actions"><span class="pill api-pill" id="apiStatus"><span class="status-dot"></span> API: Not connected</span><span class="pill" id="userChip" style="display:none"></span><button class="btn btn-dark cart-trigger" id="cartBtn"><span aria-hidden="true">▣</span> Cart <span class="cart-count" id="cartCount">0</span></button><button class="btn btn-outline" id="logoutBtn" style="display:none">Log out</button></div>
+<div class="top-actions"><span class="pill api-pill" id="apiStatus" role="status"><span class="status-dot"></span> <span id="apiStatusText">API: Checking…</span></span><span class="pill" id="userChip" style="display:none"></span><button class="btn btn-dark cart-trigger" id="cartBtn" type="button" aria-label="Open cart"><span aria-hidden="true">▣</span> Cart <span class="cart-count" id="cartCount">0</span></button><button class="btn btn-outline" id="logoutBtn" type="button" style="display:none">Log out</button></div>
 </div></header>
 <main class="container">
-<div id="configBanner" class="banner hidden">Backend not connected. Set <code>API_BASE</code> in <code>api.js</code> to your FastAPI URL. See README.md</div>
+<noscript><div class="banner">WhOM needs JavaScript enabled.</div></noscript>
+<div id="configBanner" class="banner hidden">Cannot reach the backend. Check <code>config.js</code> (<code>apiBase</code>) and that the server is running. See README.md</div>
 
-<!-- AUTH — this comes FIRST. No user = no store, no dashboard, no orders. -->
+<!-- AUTH — first screen. No user = no store, no dashboard, no orders. -->
 <section id="view-auth" class="view active">
 <div class="auth-wrap">
-<div class="card auth-card">
+<div class="card auth-card" id="authCard">
 <span class="eyebrow">WELCOME TO WHOM</span><h2 id="authTitle">Create your vendor account</h2>
 <p class="muted" id="authSub">Step 1: Create a user account. Step 2: Create your store. Step 3: Add products.</p>
 <div class="filter-pills" style="margin:12px 0"><button class="pill-btn active" id="tabSignup" type="button">Sign up</button><button class="pill-btn" id="tabLogin" type="button">Log in</button></div>
 <form id="authForm">
-<label>Full name <input name="full_name" id="authFullName" required placeholder="Your name"></label>
-<label>Email <input name="email" type="email" required placeholder="you@example.com"></label>
-<label>Password <input name="password" type="password" required minlength="8" placeholder="At least 8 characters"></label>
+<label id="authNameLabel">Full name <input name="full_name" id="authFullName" required maxlength="80" autocomplete="name" placeholder="Your name"></label>
+<label>Email <input name="email" type="email" required maxlength="190" autocomplete="email" placeholder="you@example.com"></label>
+<label>Password <input name="password" id="authPassword" type="password" required minlength="8" maxlength="72" autocomplete="new-password" placeholder="At least 8 characters"></label>
 <button class="btn btn-primary btn-block" type="submit" id="authSubmit">Create account</button>
-<p class="muted small center" id="authError" style="color:#dc2626"></p>
+<p class="small center form-error" id="authError" role="alert"></p>
 </form>
-<p class="muted small">Your account is stored on the backend (users table). Your store, products and orders will belong to this account.</p>
+<p class="muted small">Your store, products and orders belong to this account.</p>
 </div>
 <div class="card" id="authLoggedIn" style="display:none">
 <h3>You are logged in</h3><p id="authUserLine">—</p>
 <p class="muted small" id="authStoreLine">—</p>
-<button class="btn btn-primary" onclick="goDashboard()">Go to my Dashboard</button>
-<button class="btn btn-outline" id="logoutBtn2">Log out</button>
+<div class="btn-row"><button class="btn btn-primary" type="button" data-go="dashboard">Go to my Dashboard</button>
+<button class="btn btn-outline" id="logoutBtn2" type="button">Log out</button></div>
 </div>
 </div>
 </section>
 
-<!-- STOREFRONT — public, but if vendor is logged in it shows THEIR store. Otherwise shows empty / login prompt. -->
+<!-- STOREFRONT — public. Opened from a customer link (?store=slug) or as a preview of your own store. -->
 <section id="view-storefront" class="view">
 <div class="hero"><div>
 <span class="badge" id="storeCategory">Your Store</span>
 <h1 id="storeName">—</h1>
 <p id="storeDesc">—</p>
 <div class="hero-meta"><span id="storeMeta">—</span></div>
-<div class="search-row"><input id="searchInput" placeholder="Search products..."><select id="categoryFilter"><option value="all">All Categories</option></select></div>
+<div class="search-row"><input id="searchInput" type="search" placeholder="Search products..." aria-label="Search products"><select id="categoryFilter" aria-label="Filter by category"><option value="all">All Categories</option></select></div>
 </div>
-<div class="hero-card"><h3>How it works</h3><ol><li>Pick products → Add to cart</li><li>Checkout with name + address</li><li>Vendor gets it on WhatsApp instantly</li></ol><div class="hero-stat"><strong id="totalProducts">0</strong><span>Products live</span></div></div></div>
+<div class="hero-card"><h3>How it works</h3><ol><li>Pick products → Add to cart</li><li>Checkout with name + address</li><li>Send the order to the vendor on WhatsApp</li></ol><div class="hero-stat"><strong id="totalProducts">0</strong><span>Products live</span></div></div></div>
 <div class="section-head"><div><span class="eyebrow">SHOP THE COLLECTION</span><h2>Catalog</h2></div><p id="catalogSub">—</p></div>
 <div id="productGrid" class="grid"></div>
-<div id="emptyProducts" class="empty hidden"><h3>No products yet</h3><p id="emptyProductsText">This store has no products.</p><button class="btn btn-primary" onclick="goDashboard()">Go to Dashboard</button></div>
+<div id="emptyProducts" class="empty hidden"><h3>No products yet</h3><p id="emptyProductsText">This store has no products.</p><button class="btn btn-primary" id="emptyDashBtn" type="button" data-go="dashboard">Go to Dashboard</button></div>
 <div id="emptySearch" class="empty hidden">No products match your search.</div>
-<div id="loginPrompt" class="empty hidden"><h3>Log in to manage your store</h3><p>Create an account or log in, then create your store.</p><button class="btn btn-primary" onclick="showView('auth')">Create account / Log in</button></div>
+<div id="storeNotFound" class="empty hidden"><h3>Store not found</h3><p>This link may be mistyped, or the store no longer exists.</p><button class="btn btn-primary" type="button" data-go="auth">Create your own store</button></div>
+<div id="loginPrompt" class="empty hidden"><h3>Log in to manage your store</h3><p>Create an account or log in, then create your store.</p><button class="btn btn-primary" type="button" data-go="auth">Create account / Log in</button></div>
 </section>
 
-<!-- DASHBOARD — vendor only, requires login -->
+<!-- DASHBOARD — vendor only -->
 <section id="view-dashboard" class="view">
-<div id="dashboardGate" class="empty hidden"><h3>Log in first</h3><p>Your dashboard belongs to your account. Log in to see it.</p><button class="btn btn-primary" onclick="showView('auth')">Log in</button></div>
+<div id="dashboardGate" class="empty hidden"><h3>Log in first</h3><p>Your dashboard belongs to your account. Log in to see it.</p><button class="btn btn-primary" type="button" data-go="auth">Log in</button></div>
 <div id="dashboardContent">
-<div class="section-head"><div><span class="eyebrow">OVERVIEW</span><h2>Vendor Dashboard</h2><p id="dashboardSub">—</p></div><button class="btn btn-primary" id="addProductBtn">+ Add Product</button></div>
-<div class="card" id="noStoreCard" style="display:none"><h3>Create your store</h3><p class="muted">You have an account, but no store yet. Fill this in — it will belong to you.</p></div>
+<div class="section-head"><div><span class="eyebrow">OVERVIEW</span><h2>Vendor Dashboard</h2><p id="dashboardSub">—</p></div><button class="btn btn-primary" id="addProductBtn" type="button">+ Add Product</button></div>
+<div class="card notice" id="noStoreCard" style="display:none"><h3>Create your store</h3><p class="muted">You have an account, but no store yet. Fill in the form below. It will belong to you.</p></div>
 <div class="card">
 <h3>Your Store Settings</h3>
 <form id="storeForm" class="form-grid">
-<label>Store Name <input name="name" required></label>
-<label>WhatsApp Number <input name="whatsapp_number" required></label>
-<label>Category <input name="category"></label>
-<label>Location <input name="location"></label>
-<label class="full">Description <textarea name="description"></textarea></label>
-<button class="btn btn-primary" type="submit">Save Store Settings</button>
+<label>Store Name <input name="name" required minlength="2" maxlength="80"></label>
+<label>WhatsApp Number <input name="whatsapp_number" type="tel" required maxlength="30" placeholder="08012345678 or +2348012345678"></label>
+<label>Category <input name="category" maxlength="60" placeholder="e.g. Fashion, Food"></label>
+<label>Location <input name="location" maxlength="120" placeholder="e.g. Lagos"></label>
+<label class="full">Description <textarea name="description" maxlength="1000"></textarea></label>
+<div class="full"><button class="btn btn-primary" type="submit" id="storeSubmit">Save Store Settings</button></div>
 </form>
 </div>
 <div class="stats">
 <div class="stat"><span>Today's Sales</span><strong id="statToday">—</strong><small id="statTodaySub">—</small></div>
-<div class="stat"><span>This Week</span><strong id="statWeek">—</strong><small>All orders</small></div>
-<div class="stat"><span>Pending Orders</span><strong id="statPending">—</strong><small>Needs action</small></div>
+<div class="stat"><span>Last 7 Days</span><strong id="statWeek">—</strong><small>All orders</small></div>
+<div class="stat"><span>Open Orders</span><strong id="statPending">—</strong><small>New + Preparing</small></div>
 <div class="stat"><span>Products</span><strong id="statProducts">—</strong><small>In your store</small></div>
 </div>
 <div class="card"><div class="card-head"><h3>Your Products</h3></div><div class="table-wrap"><table><thead><tr><th>Product</th><th>Price</th><th>Stock</th><th>Status</th><th></th></tr></thead><tbody id="vendorTable"></tbody></table></div><div id="emptyVendorProducts" class="empty hidden">No products yet. Click + Add Product.</div></div>
-<div class="card"><h3>Your public store link</h3><div class="link-box"><code id="storeLink">—</code><button class="btn btn-outline" id="copyLinkBtn">Copy Link</button></div><p class="muted small">Built from YOUR store slug from the backend.</p></div>
+<div class="card"><h3>Your public store link</h3><div class="link-box"><code id="storeLink">—</code><button class="btn btn-outline" id="copyLinkBtn" type="button">Copy Link</button><a class="btn btn-outline" id="openLinkBtn" href="#" target="_blank" rel="noopener" style="display:none">Open</a></div><p class="muted small">Share this link on your WhatsApp status or bio. Customers don't need an account.</p></div>
 </div>
 </section>
 
-<!-- ORDERS — vendor only, requires login -->
+<!-- ORDERS — vendor only -->
 <section id="view-orders" class="view">
-<div id="ordersGate" class="empty hidden"><h3>Log in first</h3><p>Orders belong to your account. Log in to see them.</p><button class="btn btn-primary" onclick="showView('auth')">Log in</button></div>
+<div id="ordersGate" class="empty hidden"><h3>Log in first</h3><p>Orders belong to your account. Log in to see them.</p><button class="btn btn-primary" type="button" data-go="auth">Log in</button></div>
 <div id="ordersContent">
 <div class="section-head"><div><span class="eyebrow">SALES MANAGEMENT</span><h2>Orders</h2><p>New → Preparing → Delivered.</p></div>
-<div class="filter-pills"><button class="pill-btn active" data-status="all">All</button><button class="pill-btn" data-status="New">New</button><button class="pill-btn" data-status="Preparing">Preparing</button><button class="pill-btn" data-status="Delivered">Delivered</button></div></div>
+<div class="filter-pills" id="orderFilters"><button class="pill-btn active" data-status="all" type="button">All</button><button class="pill-btn" data-status="New" type="button">New</button><button class="pill-btn" data-status="Preparing" type="button">Preparing</button><button class="pill-btn" data-status="Delivered" type="button">Delivered</button></div></div>
 <div id="ordersList" class="orders"></div>
 <div id="emptyOrders" class="empty hidden"><h3>No orders yet</h3><p>When a customer checks out, their order will appear here.</p></div>
 </div>
 </section>
 </main>
-<aside id="cartDrawer" class="drawer hidden"><div class="drawer-head"><h3>Your Cart</h3><button id="closeCart">✕</button></div><div id="cartItems"></div>
+
+<aside id="cartDrawer" class="drawer hidden" aria-label="Cart"><div class="drawer-head"><h3>Your Cart</h3><button id="closeCart" type="button" aria-label="Close cart">✕</button></div><div id="cartItems"></div>
 <form id="checkoutForm" class="checkout"><h4>Checkout</h4>
-<label>Your Name <input name="customer_name" required></label>
-<label>WhatsApp Number <input name="customer_phone" required></label>
-<label>Delivery Address <textarea name="delivery_address" required></textarea></label>
-<label>Note (optional) <input name="note"></label>
+<label>Your Name <input name="customer_name" required minlength="2" maxlength="80" autocomplete="name"></label>
+<label>WhatsApp Number <input name="customer_phone" type="tel" required maxlength="30" autocomplete="tel" placeholder="08012345678"></label>
+<label>Delivery Address <textarea name="delivery_address" required minlength="5" maxlength="300" autocomplete="street-address"></textarea></label>
+<label>Note (optional) <input name="note" maxlength="300"></label>
 <div class="total-row"><span>Total</span><strong id="cartTotal">—</strong></div>
-<button class="btn btn-primary btn-block" type="submit">Place Order</button>
-<p class="muted small center">Order is sent to the vendor's backend. No data is stored in this frontend.</p></form></aside>
+<button class="btn btn-primary btn-block" type="submit" id="checkoutSubmit">Place Order</button>
+<p class="small center form-error" id="checkoutError" role="alert"></p>
+<p class="muted small center">The final price is confirmed by the store when you place the order.</p></form></aside>
 <div id="overlay" class="overlay hidden"></div>
-<div id="productModal" class="modal hidden"><div class="modal-box"><button class="modal-close" id="closeModal">✕</button><h3 id="modalTitle">Add Product</h3>
+
+<div id="productModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-box"><button class="modal-close" id="closeModal" type="button" aria-label="Close">✕</button><h3 id="modalTitle">Add Product</h3>
 <form id="productForm">
-<label>Product Name <input name="name" required></label>
-<div class="row2"><label>Price <input name="price" type="number" required></label><label>Stock <input name="stock" type="number" required></label></div>
-<label>Category <input name="category" required></label>
-<label>Description <textarea name="description"></textarea></label>
-<label>Image URL (optional) <input name="image_url" placeholder="https://..."></label>
-<button class="btn btn-primary btn-block" type="submit">Save Product</button>
+<label>Product Name <input name="name" required maxlength="120"></label>
+<div class="row2"><label>Price <input name="price" type="number" required min="0" max="100000000" step="1" inputmode="numeric"></label><label>Stock <input name="stock" type="number" required min="0" max="1000000" step="1" inputmode="numeric"></label></div>
+<label>Category <input name="category" required maxlength="60"></label>
+<label>Description <textarea name="description" maxlength="2000"></textarea></label>
+<label>Image URL (optional) <input name="image_url" type="url" maxlength="500" placeholder="https://..."></label>
+<button class="btn btn-primary btn-block" type="submit" id="productSubmit">Save Product</button>
+<p class="small center form-error" id="productError" role="alert"></p>
 </form></div></div>
-<div id="toast" class="toast hidden"></div>
-<script src="api.js"></script><script src="app.js"></script>
+
+<div id="orderDoneModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="doneTitle"><div class="modal-box center">
+<div class="done-mark" aria-hidden="true">✓</div><h3 id="doneTitle">Order placed</h3>
+<p class="muted" id="doneText">—</p>
+<p class="small muted">One last step: send your order to the vendor on WhatsApp so they can confirm it.</p>
+<button class="btn btn-primary btn-block" id="doneWhatsapp" type="button">Send order on WhatsApp</button>
+<button class="btn btn-outline btn-block" id="doneClose" type="button" style="margin-top:8px">Done</button>
+</div></div>
+
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+<script src="config.js"></script><script src="api.js"></script><script src="app.js"></script>
 </body></html>
