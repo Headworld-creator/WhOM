@@ -284,6 +284,41 @@ function migrate(): void
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
     ];
     foreach ($ddl as $sql) db()->exec($sql);
+
+    // Additive WhOM Plus migration. Existing tables and records are preserved.
+    $addColumn = function (string $table, string $column, string $mysql, string $sqlite) {
+        $exists = false;
+        if (is_mysql()) {
+            $exists = (bool) q('SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?', [$table, $column])->fetchColumn();
+        } else {
+            foreach (q("PRAGMA table_info($table)")->fetchAll() as $col) if ($col['name'] === $column) $exists = true;
+        }
+        if (!$exists) db()->exec('ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . (is_mysql() ? $mysql : $sqlite));
+    };
+    $addColumn('stores', 'tagline', 'VARCHAR(100) NULL', 'TEXT NULL');
+    $addColumn('stores', 'logo_url', 'VARCHAR(500) NULL', 'TEXT NULL');
+    $addColumn('stores', 'cover_url', 'VARCHAR(500) NULL', 'TEXT NULL');
+    $addColumn('stores', 'opening_hours', 'VARCHAR(500) NULL', 'TEXT NULL');
+    $addColumn('stores', 'delivery_info', 'VARCHAR(300) NULL', 'TEXT NULL');
+    $addColumn('stores', 'instagram', 'VARCHAR(120) NULL', 'TEXT NULL');
+    $addColumn('stores', 'accent_color', 'VARCHAR(7) NULL', 'TEXT NULL');
+    $addColumn('stores', 'accepting_orders', 'TINYINT(1) NOT NULL DEFAULT 1', 'INTEGER NOT NULL DEFAULT 1');
+    $addColumn('orders', 'payment_status', "VARCHAR(20) NOT NULL DEFAULT 'unpaid'", "TEXT NOT NULL DEFAULT 'unpaid'");
+    $addColumn('orders', 'tracking_token', 'VARCHAR(64) NULL', 'TEXT NULL');
+    $addColumn('orders', 'customer_id', 'INT UNSIGNED NULL', 'INTEGER NULL');
+    db()->exec("CREATE TABLE IF NOT EXISTS customers (
+        id " . (is_mysql() ? 'INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT') . ",
+        store_id INT NOT NULL, full_name VARCHAR(80) NOT NULL, phone VARCHAR(24) NOT NULL,
+        normalized_phone VARCHAR(24) NOT NULL, default_address VARCHAR(300) NULL,
+        created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
+        UNIQUE(store_id, normalized_phone)
+    )" . (is_mysql() ? ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4' : ''));
+    db()->exec("CREATE TABLE IF NOT EXISTS payments (
+        id " . (is_mysql() ? 'INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT') . ",
+        order_id INT NOT NULL, reference VARCHAR(100) NOT NULL UNIQUE, amount BIGINT NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending', provider VARCHAR(30) NOT NULL DEFAULT 'paystack',
+        created_at DATETIME NOT NULL
+    )" . (is_mysql() ? ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4' : ''));
 }
 
 // ═════════════════════════════════ Input helpers ═══════════════════════════════
@@ -510,6 +545,10 @@ function store_out(array $s, bool $public = false): array
         'id' => (int) $s['id'], 'name' => $s['name'], 'slug' => $s['slug'],
         'description' => $s['description'], 'category' => $s['category'], 'location' => $s['location'],
         'whatsapp_number' => $s['whatsapp_number'], 'currency' => $s['currency'], 'created_at' => iso($s['created_at']),
+        'tagline' => $s['tagline'] ?? null, 'logo_url' => $s['logo_url'] ?? null, 'cover_url' => $s['cover_url'] ?? null,
+        'opening_hours' => $s['opening_hours'] ?? null, 'delivery_info' => $s['delivery_info'] ?? null,
+        'instagram' => $s['instagram'] ?? null, 'accent_color' => $s['accent_color'] ?? null,
+        'accepting_orders' => (bool) ($s['accepting_orders'] ?? true),
     ];
     if (!$public) $o['owner_id'] = (int) $s['owner_id'];
     return $o;
@@ -541,7 +580,8 @@ function orders_out(array $rows): array
     return array_map(fn($r) => [
         'id' => (int) $r['id'], 'store_id' => (int) $r['store_id'], 'customer_name' => $r['customer_name'],
         'customer_phone' => $r['customer_phone'], 'delivery_address' => $r['delivery_address'], 'note' => $r['note'],
-        'total' => (int) $r['total'], 'status' => $r['status'], 'created_at' => iso($r['created_at']),
+        'total' => (int) $r['total'], 'status' => $r['status'], 'payment_status' => $r['payment_status'] ?? 'unpaid',
+        'tracking_token' => $r['tracking_token'] ?? null, 'created_at' => iso($r['created_at']),
         'items' => $items[(int) $r['id']] ?? [],
     ], $rows);
 }
@@ -638,10 +678,15 @@ function h_store_put(array $p, array $user): array
     $loc = nullable(str_field($b, 'location', 0, 120));
     $cur = isset($b['currency']) && trim((string) $b['currency']) !== '' ? str_field($b, 'currency', 1, 8) : null;
     $now = now_utc();
+    $extra = [];
+    foreach (['tagline'=>100,'opening_hours'=>500,'delivery_info'=>300,'instagram'=>120,'accent_color'=>7] as $key=>$max) if (array_key_exists($key, $b)) $extra[$key] = nullable(str_field($b, $key, 0, $max));
+    if (array_key_exists('accepting_orders', $b)) $extra['accepting_orders'] = filter_var($b['accepting_orders'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
 
-    $update = function (array $existing) use ($name, $wa, $desc, $cat, $loc, $cur, $now): array {
-        q('UPDATE stores SET name=?, description=?, category=?, location=?, whatsapp_number=?, currency=?, updated_at=? WHERE id=? AND owner_id=?',
-            [$name, $desc, $cat, $loc, $wa, $cur ?? $existing['currency'], $now, (int) $existing['id'], (int) $existing['owner_id']]);
+    $update = function (array $existing) use ($name, $wa, $desc, $cat, $loc, $cur, $now, $extra): array {
+        $sets = ['name=?','description=?','category=?','location=?','whatsapp_number=?','currency=?','updated_at=?']; $vals = [$name,$desc,$cat,$loc,$wa,$cur ?? $existing['currency'],$now];
+        foreach ($extra as $k=>$v) { $sets[] = $k . '=?'; $vals[] = $v; }
+        $vals[] = (int)$existing['id']; $vals[] = (int)$existing['owner_id'];
+        q('UPDATE stores SET ' . implode(',', $sets) . ' WHERE id=? AND owner_id=?', $vals);
         return [200, store_out(q('SELECT * FROM stores WHERE id = ?', [(int) $existing['id']])->fetch())];
     };
 
@@ -653,6 +698,7 @@ function h_store_put(array $p, array $user): array
             q('INSERT INTO stores (owner_id, name, slug, description, category, location, whatsapp_number, currency, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 [$uid, $name, unique_slug($name), $desc, $cat, $loc, $wa, $cur ?? (env('DEFAULT_CURRENCY', '₦') ?? '₦'), $now, $now]);
+            if ($extra) { $sid=(int)db()->lastInsertId(); $sets=[]; $vals=[]; foreach($extra as $k=>$v){$sets[]=$k.'=?';$vals[]=$v;} $vals[]=$sid; q('UPDATE stores SET '.implode(',', $sets).' WHERE id=?',$vals); }
             return [201, store_out(q('SELECT * FROM stores WHERE id = ?', [(int) db()->lastInsertId()])->fetch())];
         } catch (PDOException $e) {
             if (!is_unique_violation($e)) throw $e;
@@ -688,7 +734,8 @@ function h_products_list(array $p, array $user): array
 {
     $s = owner_store($user);
     if (!$s) return [200, []];
-    $rows = q('SELECT * FROM products WHERE store_id = ? ORDER BY id DESC', [(int) $s['id']])->fetchAll();
+    $search = trim((string)($_GET['q'] ?? ''));
+    $rows = $search === '' ? q('SELECT * FROM products WHERE store_id = ? ORDER BY id DESC', [(int) $s['id']])->fetchAll() : q('SELECT * FROM products WHERE store_id = ? AND (name LIKE ? OR category LIKE ?) ORDER BY id DESC', [(int)$s['id'], '%'.$search.'%', '%'.$search.'%'])->fetchAll();
     return [200, array_map('product_out', $rows)];
 }
 
@@ -845,8 +892,13 @@ function h_order_create(): array
             $lines[] = [$pid, $r['name'], $qty, (int) $r['price']];
         }
 
-        q('INSERT INTO orders (store_id, customer_name, customer_phone, delivery_address, note, total, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [(int) $store['id'], $name, $phone, $addr, $note, $total, 'New', now_utc()]);
+        $normalized = norm_customer_phone($phone);
+        $customer = q('SELECT id FROM customers WHERE store_id=? AND normalized_phone=?', [(int)$store['id'], $normalized])->fetch();
+        if ($customer) { $customerId=(int)$customer['id']; q('UPDATE customers SET full_name=?,phone=?,default_address=?,updated_at=? WHERE id=?',[$name,$phone,$addr,now_utc(),$customerId]); }
+        else { q('INSERT INTO customers(store_id,full_name,phone,normalized_phone,default_address,created_at,updated_at) VALUES(?,?,?,?,?,?,?)',[(int)$store['id'],$name,$phone,$normalized,$addr,now_utc(),now_utc()]); $customerId=(int)$pdo->lastInsertId(); }
+        $trackingToken = bin2hex(random_bytes(24));
+        q('INSERT INTO orders (store_id, customer_id, customer_name, customer_phone, delivery_address, note, total, status, payment_status, tracking_token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [(int) $store['id'], $customerId, $name, $phone, $addr, $note, $total, 'New', 'unpaid', $trackingToken, now_utc()]);
         $orderId = (int) $pdo->lastInsertId();
         foreach ($lines as [$pid, $pname, $qty, $price]) {
             q('INSERT INTO order_items (order_id, product_id, name, qty, price) VALUES (?, ?, ?, ?, ?)', [$orderId, $pid, $pname, $qty, $price]);
@@ -858,9 +910,33 @@ function h_order_create(): array
     }
 
     $order = orders_out([q('SELECT * FROM orders WHERE id = ?', [$orderId])->fetch()])[0];
+    $order['tracking_token'] = $trackingToken;
+    $order['tracking_url'] = 'track/' . $trackingToken;
+    $order['payment_status'] = 'unpaid';
     $order['store'] = ['name' => $store['name'], 'slug' => $store['slug'], 'whatsapp_number' => $store['whatsapp_number'], 'currency' => $store['currency']];
     return [201, $order];
 }
+
+
+// ═══════════════════════ WhOM Plus: customers, tracking, reports ═══════════════
+function norm_customer_phone(string $phone): string { return preg_replace('/\D+/', '', $phone) ?: $phone; }
+function h_customers(array $p, array $user): array {
+    $s=require_store($user); $sql='SELECT c.*, COUNT(o.id) order_count, COALESCE(SUM(CASE WHEN o.payment_status="paid" THEN o.total ELSE 0 END),0) lifetime_paid FROM customers c LEFT JOIN orders o ON o.customer_id=c.id WHERE c.store_id=?'; $args=[(int)$s['id']];
+    $qtext=trim((string)($_GET['q']??'')); if($qtext!==''){$sql.=' AND (c.full_name LIKE ? OR c.phone LIKE ?)';$args[]='%'.$qtext.'%';$args[]='%'.$qtext.'%';}
+    $rows=q($sql.' GROUP BY c.id ORDER BY c.id DESC LIMIT 300',$args)->fetchAll(); foreach($rows as &$r){$r['id']=(int)$r['id'];$r['order_count']=(int)$r['order_count'];$r['lifetime_paid']=(int)$r['lifetime_paid'];} return [200,$rows];
+}
+function h_customer_get(array $p,array $user): array { $s=require_store($user); $r=q('SELECT * FROM customers WHERE id=? AND store_id=?',[(int)$p['id'],(int)$s['id']])->fetch(); if(!$r)throw new HttpError(404,'Customer not found'); $r['orders']=orders_out(q('SELECT * FROM orders WHERE customer_id=? ORDER BY id DESC LIMIT 100',[(int)$r['id']])->fetchAll()); return [200,$r]; }
+function h_order_detail(array $p,array $user): array { $s=require_store($user); $r=q('SELECT * FROM orders WHERE id=? AND store_id=?',[(int)$p['id'],(int)$s['id']])->fetch(); if(!$r)throw new HttpError(404,'Order not found'); return [200,orders_out([$r])[0]]; }
+function h_order_filters(array $p,array $user): array { $s=require_store($user); $sql='SELECT * FROM orders WHERE store_id=?';$a=[(int)$s['id']]; foreach(['status','payment_status'] as $k)if(isset($_GET[$k])&&$_GET[$k]!==''){$sql.=" AND $k=?";$a[]=$_GET[$k];} if(!empty($_GET['q'])){$sql.=' AND (customer_name LIKE ? OR customer_phone LIKE ? OR CAST(id AS CHAR) LIKE ?)';$v='%'.$_GET['q'].'%';array_push($a,$v,$v,$v);} return [200,orders_out(q($sql.' ORDER BY id DESC LIMIT 500',$a)->fetchAll())]; }
+function h_track(array $p): array { $r=q('SELECT id,store_id,customer_name,total,status,payment_status,created_at FROM orders WHERE tracking_token=?',[$p['token']])->fetch(); if(!$r)throw new HttpError(404,'Tracking link not found'); $r['items']=orders_out([q('SELECT * FROM orders WHERE id=?',[(int)$r['id']])->fetch()])[0]['items']; $r['store']=q('SELECT name,slug,currency FROM stores WHERE id=?',[(int)$r['store_id']])->fetch(); return [200,$r]; }
+function h_marketplace(array $p): array { $qtext=trim((string)($_GET['q']??''));$sql='SELECT p.*,s.name store_name,s.slug store_slug,s.currency FROM products p JOIN stores s ON s.id=p.store_id WHERE p.is_active=1 AND s.accepting_orders=1';$a=[];if($qtext!==''){$sql.=' AND (p.name LIKE ? OR p.category LIKE ? OR s.name LIKE ?)';$v='%'.$qtext.'%';array_push($a,$v,$v,$v);} $rows=q($sql.' ORDER BY p.id DESC LIMIT 100',$a)->fetchAll();foreach($rows as &$r){$r=product_out($r)+['store_name'=>$r['store_name'],'store_slug'=>$r['store_slug'],'currency'=>$r['currency']];}return [200,$rows]; }
+function h_reports(array $p,array $user): array { $s=require_store($user);$days=min(90,max(1,(int)($_GET['days']??7)));$from=(new DateTimeImmutable('today',new DateTimeZone(env('APP_TIMEZONE','Africa/Lagos')??'Africa/Lagos')))->modify('-'.($days-1).' days')->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');$rows=q('SELECT DATE(created_at) day,COUNT(*) orders,COALESCE(SUM(total),0) revenue,COALESCE(SUM(CASE WHEN payment_status="paid" THEN total ELSE 0 END),0) paid FROM orders WHERE store_id=? AND created_at>=? GROUP BY DATE(created_at) ORDER BY day',[(int)$s['id'],$from])->fetchAll();$sum=q('SELECT COALESCE(SUM(total),0) revenue,COALESCE(SUM(CASE WHEN payment_status="paid" THEN total ELSE 0 END),0) paid,COUNT(*) orders FROM orders WHERE store_id=? AND created_at>=?',[(int)$s['id'],$from])->fetch();foreach($sum as &$v)$v=(int)$v;return [200,['days'=>$days,'summary'=>$sum,'daily'=>$rows]]; }
+function h_store_image(array $p,array $user): array { $s=require_store($user);$kind=$p['kind'];if(!in_array($kind,['logo','cover'],true))throw new HttpError(422,'Image kind must be logo or cover');$url=save_uploaded_image((string)file_get_contents('php://input'));$col=$kind==='logo'?'logo_url':'cover_url';q("UPDATE stores SET $col=? WHERE id=?",[$url,(int)$s['id']]);return [200,['url'=>$url]]; }
+
+function save_uploaded_image(string $raw): string { if(strlen($raw)>2097152)throw new HttpError(413,'Image exceeds 2 MB');$mime=(new finfo(FILEINFO_MIME_TYPE))->buffer($raw);$ext=['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp'][$mime]??null;if(!$ext)throw new HttpError(415,'Only JPEG, PNG and WebP are supported');$dir=__DIR__.'/uploads';if(!is_dir($dir)&&!mkdir($dir,0755,true))throw new HttpError(500,'Upload directory unavailable');$name=bin2hex(random_bytes(16)).'.'.$ext;if(file_put_contents($dir.'/'.$name,$raw)===false)throw new HttpError(500,'Could not save image');return 'uploads/'.$name; }
+function h_product_image(array $p,array $user): array { $s=require_store($user);$pid=(int)$p['id'];$product=q('SELECT * FROM products WHERE id=? AND store_id=?',[$pid,(int)$s['id']])->fetch();if(!$product)throw new HttpError(404,'Product not found');$url=save_uploaded_image((string)file_get_contents('php://input'));q('UPDATE products SET image_url=? WHERE id=? AND store_id=?',[$url,$pid,(int)$s['id']]);return [200,['image_url'=>$url]]; }
+function h_pay_init(array $p): array { $b=body();$oid=int_field($b,'order_id',1,PHP_INT_MAX);$email=filter_var((string)($b['email']??''),FILTER_VALIDATE_EMAIL);if(!$email)fail('email','valid email required');$o=q('SELECT o.*,s.currency FROM orders o JOIN stores s ON s.id=o.store_id WHERE o.id=?',[$oid])->fetch();if(!$o)throw new HttpError(404,'Order not found');$secret=env('PAYSTACK_SECRET_KEY');if(!$secret)throw new HttpError(503,'Online payments are not configured');$ref='WHOM-'.bin2hex(random_bytes(10));$ch=curl_init('https://api.paystack.co/transaction/initialize');curl_setopt_array($ch,[CURLOPT_POST=>true,CURLOPT_RETURNTRANSFER=>true,CURLOPT_HTTPHEADER=>['Authorization: Bearer '.$secret,'Content-Type: application/json'],CURLOPT_POSTFIELDS=>json_encode(['email'=>$email,'amount'=>(int)$o['total']*100,'reference'=>$ref,'metadata'=>['order_id'=>$oid]])]);$res=curl_exec($ch);$code=curl_getinfo($ch,CURLINFO_HTTP_CODE);curl_close($ch);$data=json_decode((string)$res,true);if($code<200||$code>=300||empty($data['status']))throw new HttpError(502,'Payment provider could not initialize payment');q('INSERT INTO payments(order_id,reference,amount,status,provider,created_at) VALUES(?,?,?,?,?,?)',[$oid,$ref,(int)$o['total'],'pending','paystack',now_utc()]);return [200,$data['data']]; }
+function h_pay_verify(array $p): array { $secret=env('PAYSTACK_SECRET_KEY');if(!$secret)throw new HttpError(503,'Online payments are not configured');$ref=$p['reference'];$ch=curl_init('https://api.paystack.co/transaction/verify/'.rawurlencode($ref));curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_HTTPHEADER=>['Authorization: Bearer '.$secret]]);$res=curl_exec($ch);$code=curl_getinfo($ch,CURLINFO_HTTP_CODE);curl_close($ch);$d=json_decode((string)$res,true);if($code!==200||empty($d['status']))throw new HttpError(502,'Could not verify payment');$paid=($d['data']['status']??'')==='success';$pay=q('SELECT * FROM payments WHERE reference=?',[$ref])->fetch();if(!$pay)throw new HttpError(404,'Payment reference not found');if($paid && (int)($d['data']['amount']??0)===(int)$pay['amount']*100){q('UPDATE payments SET status="paid" WHERE id=?',[(int)$pay['id']]);q('UPDATE orders SET payment_status="paid" WHERE id=?',[(int)$pay['order_id']]);}else{q('UPDATE payments SET status=? WHERE id=?',[$paid?'amount_mismatch':'failed',(int)$pay['id']]);$paid=false;}return [200,['verified'=>$paid,'reference'=>$ref]]; }
 
 // ═════════════════════════════════ Router ══════════════════════════════════════
 
@@ -875,12 +951,23 @@ const ROUTES = [
     ['GET',   '#^/api/products$#',                        'h_products_list',   true],
     ['POST',  '#^/api/products$#',                        'h_product_create',  true],
     ['PATCH', '#^/api/products/(?<id>\d+)$#',             'h_product_update',  true],
+    ['PUT',   '#^/api/products/(?<id>\d+)/image$#',       'h_product_image',   true],
     ['GET',   '#^/api/orders$#',                          'h_orders_list',     true],
     ['POST',  '#^/api/orders$#',                          'h_order_create',    false],   // public checkout
     ['PATCH', '#^/api/orders/(?<id>\d+)/status$#',        'h_order_status',    true],
     ['GET',   '#^/api/stats$#',                           'h_stats',           true],
     ['GET',   '#^/api/public/store/(?<slug>[a-z0-9-]{1,60})$#i',          'h_public_store',    false],
     ['GET',   '#^/api/public/store/(?<slug>[a-z0-9-]{1,60})/products$#i', 'h_public_products', false],
+    ['GET',   '#^/api/customers$#', 'h_customers', true],
+    ['GET',   '#^/api/customers/(?<id>\d+)$#', 'h_customer_get', true],
+    ['GET',   '#^/api/orders/(?<id>\d+)$#', 'h_order_detail', true],
+    ['GET',   '#^/api/orders/search$#', 'h_order_filters', true],
+    ['GET',   '#^/api/reports$#', 'h_reports', true],
+    ['GET',   '#^/api/marketplace$#', 'h_marketplace', false],
+    ['GET',   '#^/api/track/(?<token>[a-f0-9]{32,64})$#i', 'h_track', false],
+    ['PUT',   '#^/api/store/image/(?<kind>logo|cover)$#', 'h_store_image', true],
+    ['POST',  '#^/api/payments/initialize$#', 'h_pay_init', false],
+    ['GET',   '#^/api/payments/verify/(?<reference>[A-Za-z0-9_-]+)$#', 'h_pay_verify', false],
 ];
 
 function request_path(): string

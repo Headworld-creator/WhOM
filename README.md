@@ -60,15 +60,15 @@ The backend reads `MYSQL_ADDON_*` directly, so no renaming is needed. (The DEV p
    `JWT_SECRET` is generated for you.
 3. Deploy. Health check is `/api/health`. Open `https://<your-service>.onrender.com/`.
 
-| Env var                                 | Value                                                           |
-|-----------------------------------------|-----------------------------------------------------------------|
-| `APP_ENV`                               | `production`                                                    |
-| `APP_DEBUG`                             | `false`                                                         |
-| `JWT_SECRET`                            | 32+ random chars (`php -r "echo bin2hex(random_bytes(32));"`)   |
-| `MYSQL_ADDON_HOST/PORT/DB/USER/PASSWORD`| from Clever Cloud                                               |
-| `TRUST_PROXY`                           | `true` (rate limiting sees real client IPs)                     |
-| `APP_TIMEZONE`                          | `Africa/Lagos` (what "today" means on the dashboard)            |
-| `CORS_ORIGINS`                          | only if the frontend lives on another domain                    |
+| Env var | Value |
+|---|---|
+| `APP_ENV` | `production` |
+| `APP_DEBUG` | `false` |
+| `JWT_SECRET` | 32+ random chars (`php -r "echo bin2hex(random_bytes(32));"`) |
+| `MYSQL_ADDON_HOST/PORT/DB/USER/PASSWORD` | from Clever Cloud |
+| `TRUST_PROXY` | `true` (rate limiting sees real client IPs) |
+| `APP_TIMEZONE` | `Africa/Lagos` (what "today" means on the dashboard) |
+| `CORS_ORIGINS` | only if the frontend lives on another domain |
 
 The Docker image serves the frontend **and** the API from one origin, so `config.js` needs no change and CORS is not involved.
 Render's free tier sleeps after inactivity; the first request after a nap takes ~30 s.
@@ -124,3 +124,39 @@ node tests/ui_test.js    # browser flow; needs Playwright and a server on :8111 
 - **"Database unavailable"** → check credentials; set `APP_DEBUG=true` temporarily for the exact reason.
 - **"Server misconfigured: JWT_SECRET"** → set a 32+ character `JWT_SECRET`.
 - **Orders from a customer show up as a different phone format** → expected, numbers are normalised.
+
+## WhOM Plus feature additions (PHP/MySQL)
+
+This build keeps the original PHP API, MySQL schema, JWT authentication and deployment files. On the first request with `AUTO_MIGRATE=true`, the server performs additive migrations: existing users, stores, products and orders are retained. New columns and the `customers` and `payments` tables are created automatically.
+
+### Added API routes
+
+All vendor routes below require the existing `Authorization: Bearer <token>` header unless marked public.
+
+| Method | Route | Purpose |
+|---|---|---|
+| GET | `/api/customers?q=...` | Search customers and view order count / paid lifetime value |
+| GET | `/api/customers/{id}` | Customer profile and order history |
+| GET | `/api/orders/{id}` | Full order details |
+| GET | `/api/orders/search?status=...&payment_status=...&q=...` | Filter/search orders |
+| GET | `/api/reports?days=7` | Daily revenue, orders and paid totals (1–90 days) |
+| GET | `/api/marketplace?q=...` | Public cross-store product discovery |
+| GET | `/api/track/{token}` | Public, token-based order tracking; does not expose customer phone/address |
+| PUT | `/api/store/image/logo` or `/api/store/image/cover` | Upload store branding image (raw JPEG/PNG/WebP body, max 2 MB) |
+| PUT | `/api/products/{id}/image` | Upload a product image (raw JPEG/PNG/WebP body, max 2 MB) |
+| POST | `/api/payments/initialize` | Initialize Paystack payment with `{ "order_id": 1, "email": "customer@example.com" }` |
+| GET | `/api/payments/verify/{reference}` | Verify Paystack transaction server-side |
+
+`PUT /api/store` now also accepts optional `tagline`, `opening_hours`, `delivery_info`, `instagram`, `accent_color` and `accepting_orders` fields. Existing fields remain unchanged. New public checkout orders are linked to a normalized customer record and receive a random tracking token. The checkout response includes `tracking_token` and `tracking_url`.
+
+### Payment configuration
+
+Set `PAYSTACK_SECRET_KEY` in the server environment to enable payment initialization and verification. The server validates the provider's verified amount against the order total before marking an order paid. Do not expose this secret in frontend JavaScript. Payment endpoints return a configuration error when the key is absent. The PHP cURL extension must be enabled.
+
+### Upload configuration
+
+Ensure the project directory's `uploads/` folder can be created/written by the PHP process. Uploaded images are validated by MIME type and size and are stored with random filenames. Back up this directory alongside the database.
+
+### Compatibility / verification notes
+
+The existing frontend and original routes are retained. The new capabilities are exposed as additive API endpoints so the original app does not need a framework or a Python runtime. Frontend screens for the new modules can call these routes without changing the existing authentication contract. PHP syntax validation was run on `server.php`. The bundled automated suite could not be executed in this environment because the installed PHP runtime has no PDO SQLite driver; run `bash tests/run.sh` in an environment with `pdo_sqlite` enabled before deployment.
